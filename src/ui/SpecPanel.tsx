@@ -8,10 +8,13 @@ import { ARTWORK_CLEARANCE_MM, sightOf } from '../core/sizing.ts'
 import { FRAME_SHAPES } from '../core/shapes.ts'
 import { FACE_PATTERNS } from '../core/geometry/facePattern.ts'
 import { FONTS } from '../core/geometry/text.ts'
-import { formatSize, fromMm, toMm } from '../core/units.ts'
+import { formatLength, formatSize, fromMm, toMm } from '../core/units.ts'
 import { SectionDrawing } from './SectionDrawing.tsx'
+import { OrnamentPicker } from './OrnamentPicker.tsx'
+import { ORNAMENT_STYLES } from '../core/ornament/field.ts'
+import { layoutOrnament, MIN_ORNAMENT_WIDTH } from '../core/ornament/layout.ts'
 import { Chips, Field, Slider, Switch } from './controls.tsx'
-import type { FaceDesign, FrameShape, ProfilePreset, Unit } from '../core/types.ts'
+import type { FaceDesign, FrameShape, OrnamentSymmetry, ProfilePreset, Unit } from '../core/types.ts'
 
 /**
  * The configuration reads as a specification sheet rather than a wizard: each
@@ -249,6 +252,20 @@ export function SpecPanel() {
         ) : null}
       </Row>
 
+      <Row id="ornament" open={open} onToggle={toggle} label="Ornament"
+        value={ORNAMENT_STYLES.find((s) => s.id === config.ornament.style)?.label ?? 'None'}>
+        <OrnamentPicker value={config.ornament.style} config={config.ornament}
+          onChange={(style) => store.setOrnament({ style })} />
+        {config.ornament.style !== 'none' ? (
+          <OrnamentControls />
+        ) : (
+          <p className="hint">
+            Carved relief laid out in whole repeats along each rail, with matching corner pieces. It
+            prints back down with no supports, and splits only between repeats.
+          </p>
+        )}
+      </Row>
+
       <Row id="text" open={open} onToggle={toggle} label="Caption"
         value={config.text.content.trim() || 'None'}>
         <Field label="Text" hint="Left empty, no caption is cut.">
@@ -370,6 +387,57 @@ function usePinned(): [boolean, (v: boolean) => void] {
     }
   }, [pinned])
   return [pinned, setPinned]
+}
+
+/** Settings for carved ornament, and what they come to on this frame. */
+function OrnamentControls() {
+  const config = useFrameStore((s) => s.config)
+  const store = useFrameStore()
+  const o = config.ornament
+  const params = normaliseParams(config.profile)
+  const [sightW, sightH] = sightOf({ ...config, profile: params })
+  const geo = layoutOrnament(sightW, sightH, params.width, o)
+  const repeat = (n: number, pitch: number) =>
+    n ? `${n} × ${formatLength(pitch, config.unit)}` : 'corners only'
+  const rectangular = config.shape === 'rectangle' || config.shape === 'square'
+  return (
+    <>
+      {!rectangular ? (
+        <p className="hint warn">Carving is laid out for rectangular and square frames so far. This shape will print plain.</p>
+      ) : null}
+      {params.width < MIN_ORNAMENT_WIDTH ? (
+        <p className="hint warn">
+          The moulding is {params.width.toFixed(0)} mm wide. Carving wants at least {MIN_ORNAMENT_WIDTH} mm, and looks
+          its best from about 50 mm — widen it under Moulding.
+        </p>
+      ) : null}
+      <Slider label="Relief depth" value={o.depth} min={1} max={12} step={0.25}
+        onChange={(depth) => store.setOrnament({ depth })}
+        hint="How far the tallest carving stands above the moulding. 3–6 mm reads boldly from across a room and prints cleanly at 0.12–0.2 mm layers." />
+      <Slider label="Repeat length" value={o.spacing} min={1.2} max={3} step={0.05} suffix={`× width (${Math.round(o.spacing * params.width)} mm)`}
+        onChange={(spacing) => store.setOrnament({ spacing })}
+        hint="The shortest a repeat may be. Each rail fits as many whole repeats as it can; the scrolls keep their size and only the stems between them change length." />
+      <Slider label="Detail" value={o.detail} min={0} max={1} step={0.05} suffix=""
+        onChange={(detail) => store.setOrnament({ detail })}
+        hint="Bead and gadroon bands and the number of lobes on each leaf. Turn it down for a quicker, plainer print." />
+      <Chips<OrnamentSymmetry>
+        label="Arrangement"
+        value={o.symmetry}
+        options={[
+          { id: 'mirrored', label: 'Symmetrical', blurb: 'Every repeat is mirror-symmetric: C-scrolls rolled back toward a central acanthus cluster.' },
+          { id: 'running', label: 'Running vine', blurb: 'A continuous scrolling vine that flows out from the middle of each rail toward its corners.' },
+        ]}
+        onChange={(symmetry) => store.setOrnament({ symmetry })}
+      />
+      <Switch checked={o.corners} onChange={(corners) => store.setOrnament({ corners })}
+        title="Corner flourishes" note="A shell across each mitre with acanthus sweeping onto both rails." />
+      <p className="hint">
+        Top and bottom: {repeat(geo.horizontal.count, geo.horizontal.pitch)}. Sides: {repeat(geo.vertical.count, geo.vertical.pitch)}.
+        Generate to see how it splits for your bed — seams only ever fall between repeats.
+      </p>
+      {config.face.pattern !== 'none' ? <p className="hint">The surface pattern under Face is not applied while carving is on.</p> : null}
+    </>
+  )
 }
 
 function Row({

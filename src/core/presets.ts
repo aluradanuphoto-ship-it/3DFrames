@@ -40,6 +40,8 @@ export const PRINTERS: PrinterPreset[] = [
   { id: 'creality-ender5-plus', brand: 'Creality', label: 'Ender 5 Plus', x: 350, y: 350, z: 400 },
   { id: 'creality-k1-max', brand: 'Creality', label: 'K1 Max', x: 300, y: 300, z: 300 },
 
+  { id: 'elegoo-cc', brand: 'Elegoo', label: 'Centauri Carbon', x: 256, y: 256, z: 256 },
+  { id: 'elegoo-cc2', brand: 'Elegoo', label: 'Centauri Carbon 2', x: 256, y: 256, z: 256 },
   { id: 'elegoo-nep4', brand: 'Elegoo', label: 'Neptune 4', x: 225, y: 225, z: 265 },
 
   { id: 'prusa-mini', brand: 'Prusa', label: 'MINI+', x: 180, y: 180, z: 180 },
@@ -99,6 +101,22 @@ export const SIZE_PRESETS: SizePreset[] = [
   { id: '50x70', label: '50 × 70 cm', w: fits(500), h: fits(700), group: 'poster' },
 ]
 
+/** Ornament is off by default; these are the settings it starts from when turned on. */
+export const DEFAULT_ORNAMENT: FrameConfig['ornament'] = {
+  style: 'none',
+  depth: 4.5,
+  spacing: 1.5,
+  detail: 0.75,
+  corners: true,
+  symmetry: 'mirrored',
+}
+
+/**
+ * What switching to a carved style does to the moulding: carving wants a
+ * broad face to sit on, and a profile with a hollow for it to stand in.
+ */
+export const BAROQUE_PROFILE = { preset: 'classic' as const, width: 60, depth: 14, relief: 0.55 }
+
 export const DEFAULT_CONFIG: FrameConfig = {
   unit: 'in',
   material: 'pla',
@@ -112,6 +130,7 @@ export const DEFAULT_CONFIG: FrameConfig = {
   profilePreset: 'classic',
   profile: { width: 18, depth: 14, rabbetWidth: 6, rabbetDepth: 6.5, relief: 0.75 },
   face: { pattern: 'oak', depth: 0.5, scale: 6, angle: 0 },
+  ornament: DEFAULT_ORNAMENT,
   text: { content: '', font: 'inter', size: 8, style: 'raised', depth: 0.8, placement: 'bottom' },
   accessories: { clips: true, easel: false, hanger: false, backer: false },
   joint: { style: 'snap', tolerance: 0.18 },

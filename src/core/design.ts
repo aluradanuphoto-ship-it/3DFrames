@@ -58,6 +58,7 @@ export function reviveDesign(raw: unknown): Design {
   const base = designOf(DEFAULT_CONFIG)
   const profile = d.profile ?? {}
   const face = d.face ?? {}
+  const orn = d.ornament ?? {}
   const text = d.text ?? {}
   const acc = d.accessories ?? {}
   const joint = d.joint ?? {}
@@ -93,6 +94,14 @@ export function reviveDesign(raw: unknown): Design {
       depth: num(face.depth, base.face.depth),
       scale: num(face.scale, base.face.scale),
       angle: num(face.angle, base.face.angle),
+    },
+    ornament: {
+      style: pick(orn.style, ['none', 'acanthus'] as const, base.ornament.style),
+      depth: num(orn.depth, base.ornament.depth),
+      spacing: num(orn.spacing, base.ornament.spacing),
+      detail: num(orn.detail, base.ornament.detail),
+      corners: bool(orn.corners, base.ornament.corners),
+      symmetry: pick(orn.symmetry, ['mirrored', 'running'] as const, base.ornament.symmetry),
     },
     text: {
       content: typeof text.content === 'string' ? text.content.slice(0, 64) : base.text.content,
@@ -153,7 +162,10 @@ export function decodeDesign(text: string): Design | null {
 /** One line describing a design, for the saved list. */
 export function summarise(design: Design): string {
   const size = formatSize(design.interiorWidth, design.interiorHeight, design.unit)
-  const pattern = design.face.pattern === 'none' ? '' : ` · ${design.face.pattern}`
+  const pattern =
+    design.ornament?.style && design.ornament.style !== 'none'
+      ? ` · ${design.ornament.style}`
+      : design.face.pattern === 'none' ? '' : ` · ${design.face.pattern}`
   return `${size} · ${design.profilePreset} ${design.profile.width}×${design.profile.depth}${pattern}`
 }
 

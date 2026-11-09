@@ -1,8 +1,10 @@
 import { create } from 'zustand'
 import type { BuildResult, FrameConfig } from '../core/types.ts'
-import { DEFAULT_CONFIG } from '../core/presets.ts'
+import { BAROQUE_PROFILE, DEFAULT_CONFIG } from '../core/presets.ts'
+import { heightSweep } from '../core/geometry/heightfield.ts'
+import { MIN_ORNAMENT_WIDTH } from '../core/ornament/layout.ts'
 import { configFrom, type Design } from '../core/design.ts'
-import { buildFrame } from '../core/frame.ts'
+import { buildFrame, ornamentPlan } from '../core/frame.ts'
 import { buildCoupon } from '../core/coupon.ts'
 import { encode3mf } from '../core/export/threemf.ts'
 import { download } from '../core/export/download.ts'
@@ -37,6 +39,11 @@ interface FrameStore {
   setProfile: (patch: Partial<FrameConfig['profile']>) => void
   setArtwork: (thickness: number) => void
   setFace: (patch: Partial<FrameConfig['face']>) => void
+  /**
+   * Turning carving on also gives the moulding room for it: a face too narrow
+   * for a scroll is widened, which is the only sensible reading of the request.
+   */
+  setOrnament: (patch: Partial<FrameConfig['ornament']>) => void
   setText: (patch: Partial<FrameConfig['text']>) => void
   setPlate: (patch: Partial<FrameConfig['plate']>) => void
   setAccessory: (key: keyof FrameConfig['accessories'], value: boolean) => void
@@ -63,6 +70,25 @@ function computePreview(config: FrameConfig): Float32Array {
       sightSize(config.interiorHeight, params.rabbetWidth),
       config.quality,
     )
+  const ornament = ornamentPlan(
+    config,
+    profile,
+    sightSize(config.interiorWidth, params.rabbetWidth),
+    sightSize(config.interiorHeight, params.rabbetWidth),
+    [],
+    true,
+  )
+  if (ornament) {
+    return toTriangleSoup(
+      heightSweep({
+        points: ornament.path.points,
+        frames: ornament.path.frames,
+        section: ornament.section,
+        height: ornament.height,
+        closed: true,
+      }),
+    )
+  }
   const frames = miterFrames(path.points)
   const { at, total } = pathLengths(path.points)
   return toTriangleSoup(
@@ -119,6 +145,27 @@ export const useFrameStore = create<FrameStore>((set, get) => ({
     set(withPreview({ ...config, artwork: { thickness }, profile: { ...profile, rabbetDepth, depth } }))
   },
   setFace: (patch) => set(withPreview({ ...get().config, face: { ...get().config.face, ...patch } })),
+  setOrnament: (patch) => {
+    const config = get().config
+    const ornament = { ...config.ornament, ...patch }
+    const turningOn = config.ornament.style === 'none' && ornament.style !== 'none'
+    const widen = turningOn && config.profile.width < MIN_ORNAMENT_WIDTH * 1.5
+    set(withPreview({
+      ...config,
+      ornament,
+      ...(widen
+        ? {
+            profilePreset: BAROQUE_PROFILE.preset,
+            profile: {
+              ...config.profile,
+              width: BAROQUE_PROFILE.width,
+              depth: Math.max(config.profile.depth, BAROQUE_PROFILE.depth),
+              relief: BAROQUE_PROFILE.relief,
+            },
+          }
+        : {}),
+    }))
+  },
   setText: (patch) => set(withPreview({ ...get().config, text: { ...get().config.text, ...patch } })),
   setPlate: (patch) => set(withPreview({ ...get().config, plate: { ...get().config.plate, ...patch } })),
   setAccessory: (key, value) =>

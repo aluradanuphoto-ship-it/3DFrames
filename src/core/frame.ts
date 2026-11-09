@@ -5,7 +5,10 @@ import { buildProfile, normaliseParams } from './profiles.ts'
 import { sightOf, sightSize } from './sizing.ts'
 import { createDisplacer } from './geometry/facePattern.ts'
 import { sweep } from './geometry/sweep.ts'
-import { planSplit } from './geometry/split.ts'
+import { planOrnamentSplit, planSplit, type SplitPlan } from './geometry/split.ts'
+import { heightSweep, ornamentSection } from './geometry/heightfield.ts'
+import { layoutOrnament, ornamentPath, MIN_ORNAMENT_WIDTH, type OrnamentPath } from './ornament/layout.ts'
+import { ornamentField, ornamentStyle } from './ornament/field.ts'
 import { buildJoint } from './geometry/joints.ts'
 import { backerFit, backerGroove, buildAccessories, buildClip, clipFit, clipSlots, hangerOutline, minimumRabbetDepth } from './geometry/accessories.ts'
 import { boundsOf, toTriangleSoup, volumeOf, type RawMesh } from './geometry/mesh.ts'
@@ -49,20 +52,21 @@ export async function buildFrame(config: FrameConfig, deps: BuildDeps): Promise<
 
   const profileParams = normaliseParams(config.profile)
   const profile = buildProfile(config.profilePreset, profileParams, config.quality)
+  const sightW = sightSize(config.interiorWidth, profileParams.rabbetWidth)
+  const sightH = sightSize(config.interiorHeight, profileParams.rabbetWidth)
+
+  // Ornament replaces the plain sweep with a carved one, laid out on its own
+  // columns so seams can only fall between repeats.
+  const ornament = ornamentPlan(config, profile, sightW, sightH, warnings)
   // Give the splitter somewhere to cut: seams can only land on path vertices,
   // so long rails need interior points before they can be divided.
-  const path = densifyPath(
-    buildOpeningPath(
-      config.shape,
-      sightSize(config.interiorWidth, profileParams.rabbetWidth),
-      sightSize(config.interiorHeight, profileParams.rabbetWidth),
-      config.quality,
-    ),
+  const path = ornament?.path ?? densifyPath(
+    buildOpeningPath(config.shape, sightW, sightH, config.quality),
     Math.min(config.plate.x, config.plate.y) / 3,
   )
-  const frames = miterFrames(path.points)
+  const frames = ornament?.path.frames ?? miterFrames(path.points)
   const { at, total } = pathLengths(path.points)
-  const displacer = createDisplacer(config.face, total)
+  const displacer = ornament ? null : createDisplacer(config.face, total)
 
   const outerPath = offsetPath(path.points, frames, profileParams.width)
   const xs = outerPath.map((p) => p[0])
@@ -87,7 +91,12 @@ export async function buildFrame(config: FrameConfig, deps: BuildDeps): Promise<
     return worst > 0 ? worst + 1 : 0
   })()
 
-  const plan = planSplit(path, frames, profileParams.width, config.plate, jointAllowance)
+  const plan: SplitPlan =
+    (ornament && planOrnamentSplit(ornament.path, frames, profileParams.width, config.plate, jointAllowance)) ||
+    planSplit(path, frames, profileParams.width, config.plate, jointAllowance)
+  if (ornament && plan.seams.some((j) => path.sharp[j])) {
+    warnings.push('A corner piece with its flourish will not fit this bed, so the frame is cut at the mitres instead, through the corner carving.')
+  }
   notes.push(...plan.notes)
   warnings.push(...plan.warnings)
 
@@ -111,7 +120,13 @@ export async function buildFrame(config: FrameConfig, deps: BuildDeps): Promise<
   let segments = plan.segments.map((seg) =>
     toManifold(
       kernel,
-      sweep({
+      ornament ? heightSweep({
+        points: seg.indices.map((j) => path.points[j]),
+        frames: seg.indices.map((j) => frames[j]),
+        section: ornament.section,
+        height: ornament.height,
+        closed: plan.single,
+      }) : sweep({
         points: seg.indices.map((j) => path.points[j]),
         frames: seg.indices.map((j) => frames[j]),
         arc: arcAlong(seg.indices),
@@ -186,7 +201,9 @@ export async function buildFrame(config: FrameConfig, deps: BuildDeps): Promise<
   }
 
   // ---- Text ---------------------------------------------------------------
-  if (config.text.content.trim()) {
+  if (config.text.content.trim() && ornament) {
+    warnings.push('Captions are not yet supported on a carved frame — the text was left off.')
+  } else if (config.text.content.trim()) {
     try {
       segments = await applyText(deps, segments, config, path.points, frames, profileParams, plan, bounds, warnings)
     } catch (error) {
@@ -239,9 +256,11 @@ export async function buildFrame(config: FrameConfig, deps: BuildDeps): Promise<
   }
   const clipWhere: number[] = []
   if (clip) {
-    const spots = plan.single
-      ? [0, 1, 2, 3].map((k) => Math.round((k * path.points.length) / 4))
-      : plan.segments.map((seg) => seg.indices[Math.floor(seg.indices.length / 2)])
+    const spots = ornament
+      ? ornamentClipSpots(ornament.path, plan)
+      : plan.single
+        ? [0, 1, 2, 3].map((k) => Math.round((k * path.points.length) / 4))
+        : plan.segments.map((seg) => seg.indices[Math.floor(seg.indices.length / 2)])
     for (const j of spots) if (!clipWhere.includes(j)) clipWhere.push(j)
     const slots = clipSlots(ctx, clip, clipWhere)
     if (slots) {
@@ -256,8 +275,10 @@ export async function buildFrame(config: FrameConfig, deps: BuildDeps): Promise<
   let curved = 0
   segments.forEach((seg, i) => {
     const run = plan.segments[i].indices
-    const straight = isStraight(run, frames)
-    if (!straight) curved++
+    // Carved pieces print back down: the carving is a height field, so it
+    // never overhangs, and the rabbet ceiling is a short bridge.
+    const straight = ornament ? false : isStraight(run, frames)
+    if (!straight && !ornament) curved++
     parts.push(
       makePart(
         `frame-${i}`,
@@ -265,12 +286,14 @@ export async function buildFrame(config: FrameConfig, deps: BuildDeps): Promise<
         'frame',
         fromManifold(seg),
         straight ? onOuterFace(straight.tangent, straight.outward) : UPRIGHT,
-        !straight,
+        !straight && !ornament,
       ),
     )
   })
   notes.push(
-    curved === 0
+    ornament
+      ? `Carved pieces print back down with no supports: the carving never overhangs, and the rabbet ceiling is a ${profileParams.rabbetWidth.toFixed(0)} mm bridge.`
+      : curved === 0
       ? 'Rails print on their outer face, so the rabbet is never an overhang and no supports are needed.'
       : `${curved} curved ${curved === 1 ? 'run prints' : 'runs print'} face up and will need support under the rabbet; the rest lie on their outer face, support free.`,
   )
@@ -534,4 +557,87 @@ function faceHeightAt(config: FrameConfig, u: number): number {
     if (Math.abs(p.u - u) < config.profile.width * 0.25) best = Math.max(best, p.v)
   }
   return best || normaliseParams(config.profile).depth
+}
+
+/** Grid spacing of the carving, by quality. */
+const ORNAMENT_STEP = [0.9, 0.7, 0.5, 0.4]
+/** Most face samples a carved frame may have, which bounds memory and export size. */
+const ORNAMENT_SAMPLES = 1_600_000
+
+/**
+ * Everything the carved sweep needs, or null for a plain frame. Ornament is
+ * laid out for rectangles only for now; anything else falls back to the plain
+ * moulding with a warning rather than failing.
+ */
+export function ornamentPlan(
+  config: FrameConfig,
+  profile: ReturnType<typeof buildProfile>,
+  sightW: number,
+  sightH: number,
+  warnings: string[],
+  preview = false,
+): { path: OrnamentPath; section: ReturnType<typeof ornamentSection>; height: (x: number, y: number) => number } | null {
+  const style = ornamentStyle(config.ornament.style)
+  if (!style) return null
+  if (config.shape !== 'rectangle' && config.shape !== 'square') {
+    warnings.push('Carved ornament is only available on rectangular and square frames so far — this one is plain.')
+    return null
+  }
+  const params = normaliseParams(config.profile)
+  if (params.width < MIN_ORNAMENT_WIDTH) {
+    warnings.push(
+      `Carving needs a moulding at least ${MIN_ORNAMENT_WIDTH} mm wide to print cleanly; at ${params.width.toFixed(0)} mm the finest details will be lost.`,
+    )
+  }
+  const geo = layoutOrnament(sightW, sightH, params.width, config.ornament)
+  const perimeter = 2 * (sightW + sightH) + 8 * params.width
+  const budget = preview ? ORNAMENT_SAMPLES / 8 : ORNAMENT_SAMPLES
+  const step = Math.max(preview ? 1 : ORNAMENT_STEP[config.quality] ?? 0.7, Math.sqrt((perimeter * params.width) / budget))
+  return {
+    path: ornamentPath(geo, step),
+    section: ornamentSection(profile, step),
+    height: ornamentField(geo, style, profile),
+  }
+}
+
+/** Closest a clip slot may come to a seam, so it stays clear of the joint. */
+const CLIP_CLEARANCE_MM = 30
+
+/**
+ * Where clips go on a carved frame: one near the middle of every rail, and
+ * one more on each straight piece, always on a square column, never on a
+ * seam or in a corner fan, and clear of the joints either side.
+ */
+function ornamentClipSpots(path: OrnamentPath, plan: SplitPlan): number[] {
+  const seams = new Set(plan.seams)
+  const n = path.points.length
+  const clear = (j: number) => {
+    if (!path.square[j] || seams.has(j)) return false
+    for (const s of plan.seams) {
+      if (path.edge[s] === path.edge[j] && Math.abs(path.along[s] - path.along[j]) < CLIP_CLEARANCE_MM) return false
+    }
+    return true
+  }
+  const nearest = (pool: number[], target: number) =>
+    pool.reduce((a, b) => (Math.abs(path.along[b] - target) < Math.abs(path.along[a] - target) ? b : a))
+
+  const spots: number[] = []
+  if (!plan.single) {
+    for (const seg of plan.segments) {
+      if (seg.indices.some((j) => path.sharp[j])) continue
+      const pool = seg.indices.filter((j) => clear(j) && path.clipable[j])
+      if (!pool.length) continue
+      const ends = [path.along[seg.indices[0]], path.along[seg.indices[seg.indices.length - 1]]]
+      spots.push(nearest(pool, (ends[0] + ends[1]) / 2))
+    }
+  }
+  for (let e = 0; e < 4; e++) {
+    if (spots.some((j) => path.edge[j] === e)) continue
+    const rail: number[] = []
+    for (let j = 0; j < n; j++) if (path.edge[j] === e) rail.push(j)
+    const length = Math.max(...rail.map((j) => path.along[j]))
+    const pool = rail.filter(clear)
+    if (pool.length) spots.push(nearest(pool, length / 2))
+  }
+  return spots
 }

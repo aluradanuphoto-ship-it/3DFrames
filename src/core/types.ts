@@ -62,6 +62,38 @@ export type FacePattern =
   | 'beadboard'
   | 'knurled'
 
+/**
+ * Sculpted ornament applied over the moulding. Unlike a face pattern, which
+ * is a shallow texture cut into the face, an ornament is raised relief laid
+ * out motif by motif: corner pieces, whole repeats along each rail, and nothing
+ * stretched to make the numbers come out.
+ */
+export type OrnamentStyle = 'none' | 'acanthus'
+
+/**
+ * 'mirrored' — every repeat is symmetrical: back-to-back C-scrolls round a
+ * central acanthus fan. 'running' — a continuous scrolling vine (rinceau) that
+ * flows out from the centre of each rail toward its corners.
+ */
+export type OrnamentSymmetry = 'mirrored' | 'running'
+
+export interface OrnamentConfig {
+  style: OrnamentStyle
+  /** Height of the tallest relief above the moulding face (mm). */
+  depth: number
+  /**
+   * Minimum length of one repeat, as a multiple of the moulding width. Each
+   * rail fits as many whole repeats as it can at or above this length; the
+   * motifs keep their size and only the stems between them take up the slack.
+   */
+  spacing: number
+  /** 0..1 — how much secondary carving: bead and gadroon bands, leaf lobes. */
+  detail: number
+  /** A shell-and-acanthus flourish across each mitre. */
+  corners: boolean
+  symmetry: OrnamentSymmetry
+}
+
 export type TextStyle = 'raised' | 'engraved'
 export type TextPlacement = 'bottom' | 'top'
 
@@ -182,6 +214,7 @@ export interface FrameConfig {
   profilePreset: ProfilePreset
   profile: ProfileParams
   face: FaceDesign
+  ornament: OrnamentConfig
   text: TextConfig
   accessories: Accessories
   joint: JointConfig

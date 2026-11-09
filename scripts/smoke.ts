@@ -1150,5 +1150,156 @@ console.log('')
     !foldedFrame.warnings.some((w) => /bulge/i.test(w)), foldedFrame.warnings.join('; '))
 }
 
+
+// ---------------------------------------------------------------------------
+// Carved ornament: modular corners and repeats, seamless at every join.
+// ---------------------------------------------------------------------------
+{
+  const { layoutOrnament, ornamentPath } = await import('../src/core/ornament/layout.ts')
+  const { ornamentField, ornamentStyle, railCoords } = await import('../src/core/ornament/field.ts')
+  const { acanthus } = await import('../src/core/ornament/acanthus.ts')
+
+  const carved = (w: number, h: number, bed: number, extra: Partial<FrameConfig> = {}): FrameConfig => ({
+    ...DEFAULT_CONFIG,
+    interiorWidth: w, interiorHeight: h,
+    profilePreset: 'classic',
+    profile: { width: 60, depth: 14, rabbetWidth: 8, rabbetDepth: 6.5, relief: 0.55 },
+    plate: { printer: 'custom', x: bed, y: bed, z: 250, smartOrientation: true },
+    ornament: { ...DEFAULT_CONFIG.ornament, style: 'acanthus' },
+    ...extra,
+  })
+
+  const fitsBed = (r: Awaited<ReturnType<typeof buildFrame>>, bed: number) =>
+    r.parts.filter((part) => {
+      const pos = orientForPrint(part)
+      const hull: [number, number][] = []
+      let tall = 0
+      for (let i = 0; i < pos.length; i += 3) {
+        hull.push([pos[i], pos[i + 1]])
+        if (pos[i + 2] > tall) tall = pos[i + 2]
+      }
+      const rect = minAreaRect(hull)
+      return !fitsOnPlate(rect.width, rect.height, bed, bed, true) || tall > 250
+    })
+
+  const cases: [string, number, number, number, Partial<FrameConfig>][] = [
+    ['carved 5×7 in', 135, 186, 256, {}],
+    ['carved A3', 303, 426, 256, {}],
+    ['carved 600×800 running', 600, 800, 256, { ornament: { ...DEFAULT_CONFIG.ornament, style: 'acanthus', symmetry: 'running' } }],
+    ['carved 200×1000 on 220', 200, 1000, 220, {}],
+    ['carved A3 plain corners', 303, 426, 220, { ornament: { ...DEFAULT_CONFIG.ornament, style: 'acanthus', corners: false, detail: 0 } }],
+  ]
+  for (const [label, w, h, bed, extra] of cases) {
+    const cfg = carved(w, h, bed, extra)
+    const r = await buildFrame(cfg, deps)
+    partsAreSolid(label, r)
+    const big = fitsBed(r, bed)
+    check(`${label}: every part fits the ${bed} mm bed`, big.length === 0, big.map((p) => p.name).join(', '))
+    const frames = r.parts.filter((p) => p.kind === 'frame')
+    check(`${label}: carved pieces print without support`, frames.every((p) => !p.needsSupport))
+    check(`${label}: flat back on the bed`, frames.every((p) => Math.abs(p.bounds.min[2]) < 1e-3))
+    check(`${label}: relief stands above the moulding`,
+      frames.every((p) => p.bounds.max[2] > cfg.profile.depth + 1),
+      frames.map((p) => p.bounds.max[2].toFixed(1)).join(', '))
+    check(`${label}: no warnings`, r.warnings.length === 0, r.warnings.join('; '))
+  }
+
+  // Seams go only between repeats, never on a mitre, and the four corners match.
+  {
+    const cfg = carved(600, 800, 256)
+    const params = normaliseParams(cfg.profile)
+    const geo = layoutOrnament(sightSize(cfg.interiorWidth, params.rabbetWidth), sightSize(cfg.interiorHeight, params.rabbetWidth), params.width, cfg.ornament)
+    const path = ornamentPath(geo, 1)
+    const { planOrnamentSplit } = await import('../src/core/geometry/split.ts')
+    const plan = planOrnamentSplit(path, path.frames, params.width, cfg.plate, 30)
+    check('carved split: planned without falling back', plan !== null)
+    if (plan) {
+      check('carved split: every seam is on a repeat boundary', plan.seams.every((j) => path.seamable[j] && !path.sharp[j]))
+      const corners = plan.segments.filter((s) => s.indices.some((j) => path.sharp[j]))
+      check('carved split: four corner pieces, one mitre each',
+        corners.length === 4 && corners.every((s) => s.indices.filter((j) => path.sharp[j]).length === 1))
+      const sizes = corners.map((s) => `${s.footprint.width.toFixed(1)}×${s.footprint.height.toFixed(1)}`)
+      check('carved split: corner pieces match', new Set(sizes).size === 1, sizes.join(', '))
+    }
+  }
+
+  // The carving meets itself across the mitre, mirrors about the middle of each
+  // rail, and keeps the same motif size whatever the frame size.
+  for (const symmetry of ['mirrored', 'running'] as const) {
+    const o = { ...DEFAULT_CONFIG.ornament, style: 'acanthus' as const, symmetry }
+    const geo = layoutOrnament(420, 560, 60, o)
+    let mitre = 0
+    let mirror = 0
+    for (let k = 0; k <= 200; k++) {
+      const u = (60 * k) / 200
+      // A point on the bottom-right mitre, read as if on either rail.
+      const onBottom = acanthus(-u, u, geo.horizontal, geo)
+      const onRight = acanthus(-u, u, geo.vertical, geo)
+      mitre = Math.max(mitre, Math.abs(onBottom - onRight))
+      for (const x of [3, 41, 77]) {
+        const y = -geo.hh - u
+        const f = ornamentField(geo, ornamentStyle('acanthus')!, buildProfile('classic', normaliseParams({ width: 60, depth: 14, rabbetWidth: 8, rabbetDepth: 6.5, relief: 0.55 }), 1))
+        mirror = Math.max(mirror, Math.abs(f(x, y) - f(-x, y)))
+      }
+    }
+    check(`${symmetry} carving: continuous across the mitre`, mitre < 1e-9, `${mitre}`)
+    if (symmetry === 'mirrored') check('mirrored carving: mirrors about the middle of each rail', mirror < 1e-9, `${mirror}`)
+
+    const small = layoutOrnament(420, 560, 60, o)
+    const large = layoutOrnament(900, 1300, 60, o)
+    let drift = 0
+    for (let k = 0; k < 400; k++) {
+      const d = -50 + (k / 400) * (small.corner + 50)
+      const u = (k * 37) % 60
+      if (-d > u) continue
+      drift = Math.max(drift, Math.abs(acanthus(d, u, small.horizontal, small) - acanthus(d, u, large.horizontal, large)))
+    }
+    check(`${symmetry} carving: corners identical at any frame size`, drift < 1e-9, `${drift}`)
+    check(`${symmetry} carving: repeats never shorter than allowed`,
+      [small, large].every((g) => [g.horizontal, g.vertical].every((e) => e.count === 0 || e.pitch >= g.minPitch * 0.92 - 1e-9)))
+
+    // At every repeat boundary the relief is identical either side.
+    let jump = 0
+    for (const e of [large.horizontal, large.vertical]) {
+      for (let t = 0; t <= e.count; t++) {
+        const d = e.corner + t * e.pitch
+        if (d > e.length) break
+        for (let u = 0; u <= 60; u += 0.5) {
+          // Running repeats are laid out along the rail, so check from both ends.
+          for (const along of symmetry === 'running' ? [d, e.length - d] : [d]) {
+            jump = Math.max(jump, Math.abs(acanthus(d - 1e-6, u, e, large, along - 1e-6) - acanthus(d + 1e-6, u, e, large, along + 1e-6)))
+          }
+        }
+      }
+    }
+    check(`${symmetry} carving: seamless at every repeat boundary`, jump < 1e-3, `${jump.toFixed(5)} mm`)
+  }
+
+  {
+    // The carving fades out at the sight edge and the outer edge, so the
+    // silhouette is the profile's, and it never pokes through the rabbet.
+    const o = { ...DEFAULT_CONFIG.ornament, style: 'acanthus' as const }
+    const geo = layoutOrnament(300, 400, 60, o)
+    let edge = 0
+    for (let d = -60; d < 200; d += 0.7) {
+      edge = Math.max(edge, acanthus(d, 0, geo.vertical, geo), acanthus(d, 60, geo.vertical, geo))
+    }
+    check('carving dies away at both edges of the moulding', edge < 1e-6, `${edge}`)
+    const { d, u } = railCoords(geo, geo.hw + 10, 0)
+    check('rail coordinates: a point on the right rail', Math.abs(u - 10) < 1e-9 && Math.abs(d - geo.hh) < 1e-9)
+  }
+
+  {
+    // Carving only knows rectangles so far: anything else stays plain, and says so.
+    const r = await buildFrame(carved(200, 200, 256, { shape: 'circle' }), deps)
+    partsAreSolid('carved circle (falls back)', r)
+    check('carving on a circle is reported, not silently dropped', r.warnings.some((w) => /rectangular/i.test(w)))
+    const old = reviveDesign({ ...designOf(DEFAULT_CONFIG), ornament: undefined })
+    check('a design saved before ornament existed opens plain', old.ornament.style === 'none')
+    const kept = decodeDesign(encodeDesign(designOf(carved(300, 400, 256))))
+    check('a carved design survives a share link', kept?.ornament.style === 'acanthus')
+  }
+}
+
 console.log(failures ? `\n${failures} check(s) failed` : '\nall checks passed')
 process.exit(failures ? 1 : 0)

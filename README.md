@@ -20,6 +20,10 @@ browser and the files never leave your machine.
   face width, thickness, rabbet and relief.
 - **Nine face textures** cut into the surface as actual relief, so the grain or
   fluting survives into the print rather than being a render trick.
+- **Carved Baroque ornament** — C-scrolls, acanthus and shell corners in deep
+  relief, laid out in whole repeats along each rail so any size of frame gets
+  the same carving without anything being stretched. Splits into four matching
+  corner pieces and straight runs, with seams only ever between repeats.
 - **Captions** embossed or engraved into a rail, in any of four bundled faces.
 - **Fittings**: sprung retaining clips, a snap-in backing panel, keyhole hanger,
   and slotted desk stands.
@@ -166,6 +170,27 @@ If your repository is not called `3DFrames`, change `base` in
 [`vite.config.ts`](vite.config.ts) to match, or set `BASE_PATH=/` for a
 user or organisation site.
 
+**Carving.** An ornamented frame uses the same sweep with two changes. The
+face is a height field read from the plan position, sampled finely in both
+directions. Near each mitre the columns fan out so the corner is sampled as
+closely as the rail. Every motif is a function of `(d, u)`: `d` is the distance
+from the nearer corner (negative past it) and `u` is the distance out from the
+sight edge. All four rails use the same function, so the carving meets itself
+exactly on every mitre and is symmetrical about the diagonal by construction.
+Each rail fits as many whole repeats as it can at or above the chosen length.
+The motifs keep their size, and only the plain stems between them take up the
+remainder. The splitter may only cut on repeat boundaries:
+
+```
+corner zone │ repeat │ repeat │ … │ repeat │ corner zone
+            ^seam candidates^ (never a mitre, never inside a motif)
+```
+
+It gives every corner piece the same number of repeats along both rails, then
+groups what is left into straights of nearly equal length. The back stays flat
+and the relief can only rise, so carved pieces print back down with no supports;
+the only overhang is the rabbet ceiling, which is a short bridge.
+
 ## Layout
 
 ```
@@ -178,6 +203,12 @@ src/core/           geometry, no DOM and no browser APIs
     split.ts        where to cut so every piece fits the bed
     joints.ts       snap tenons, sockets and butterfly keys
     facePattern.ts  surface relief as a height field
+    heightfield.ts  the carved sweep: a height-field face on fanned columns
+  ornament/
+    layout.ts       repeats per rail, corner zones, sweep columns
+    acanthus.ts     the Baroque acanthus style
+    primitives.ts   volutes, leaves, shells, beads — carving as height fields
+    field.ts        style registry and plan → height
     packing.ts      convex hull, min-area rect, rect-in-rect fit
   design.ts         saving, sharing and reviving a design
   print.ts          per-part print orientation
@@ -188,7 +219,12 @@ scripts/smoke.ts    the geometry test suite
 
 ## Printing notes
 
-Print each STL exactly as exported. Straight rails come out already turned onto
+Carved pieces print back down, as exported, with no supports. A 0.12–0.16 mm
+layer height brings out the leaves; 0.2 mm is fine for a quick print. Matte
+black, metallic dry-brushing over a dark base, and antique gold all suit the
+carving.
+
+Print every other STL exactly as exported. Straight rails come out already turned onto
 their outer face — that is what keeps the rabbet from being an overhang, so do
 not lay them flat. Nothing needs support unless your frame has curved runs, and
 the generated guide says which ones if so.

@@ -385,6 +385,30 @@ input[type='text']:focus, input[type='number']:focus, select:focus { border-colo
   font-weight: 600;
 }
 
+.ornament-picker { display: flex; flex-wrap: wrap; gap: 8px; }
+.ornament-card {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 4px;
+  background: var(--film-2);
+  border: 1px solid var(--rule);
+  border-radius: var(--radius);
+  color: var(--lead-6);
+  cursor: pointer;
+  font-size: 12px;
+  text-align: left;
+}
+.ornament-card:hover { border-color: var(--lead-1); }
+.ornament-card[aria-pressed='true'] {
+  background: var(--blue-wash);
+  border-color: var(--blue);
+  color: var(--blue-ink);
+  font-weight: 600;
+}
+.ornament-swatch { display: block; max-width: 100%; border-radius: calc(var(--radius) - 1px); background: var(--film-3); }
+.hint.warn { color: var(--redline); }
+
 .slider { display: grid; grid-template-columns: 1fr 62px; gap: 10px; align-items: center; }
 
 input[type='range'] {
