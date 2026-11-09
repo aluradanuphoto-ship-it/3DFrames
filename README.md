@@ -20,10 +20,15 @@ browser and the files never leave your machine.
   face width, thickness, rabbet and relief.
 - **Nine face textures** cut into the surface as actual relief, so the grain or
   fluting survives into the print rather than being a render trick.
-- **Carved Baroque ornament** — C-scrolls, acanthus and shell corners in deep
-  relief, laid out in whole repeats along each rail so any size of frame gets
-  the same carving without anything being stretched. Splits into four matching
-  corner pieces and straight runs, with seams only ever between repeats.
+- **Ornament in two styles**, both laid out in whole repeats along each rail so
+  any size of frame gets the same design without anything being stretched, and
+  both split into four matching corner pieces and straight runs with seams only
+  ever between repeats:
+  - *Baroque acanthus* — deep carving: scrolls of foliage coiled round
+    rosettes, palmettes, scallop-shell corners, pearl and rope bands.
+  - *Filigree scrollwork* — fine raised scrolls and tendrils on a flat ground
+    inside a raised rim. Two levels only, so a filament change at the top of
+    the ground prints the line work in a second colour.
 - **Captions** embossed or engraved into a rail, in any of four bundled faces.
 - **Fittings**: sprung retaining clips, a snap-in backing panel, keyhole hanger,
   and slotted desk stands.
@@ -206,8 +211,9 @@ src/core/           geometry, no DOM and no browser APIs
     heightfield.ts  the carved sweep: a height-field face on fanned columns
   ornament/
     layout.ts       repeats per rail, corner zones, sweep columns
-    acanthus.ts     the Baroque acanthus style
-    primitives.ts   volutes, leaves, shells, beads — carving as height fields
+    acanthus.ts     the Baroque acanthus style: carving
+    filigree.ts     the filigree style: line work drawn as strokes
+    primitives.ts   leaves, foliage scrolls, shells, rosettes — carving as height fields
     field.ts        style registry and plan → height
     packing.ts      convex hull, min-area rect, rect-in-rect fit
   design.ts         saving, sharing and reviving a design

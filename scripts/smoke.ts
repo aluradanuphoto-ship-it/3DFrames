@@ -1166,6 +1166,9 @@ console.log('')
     profile: { width: 60, depth: 14, rabbetWidth: 8, rabbetDepth: 6.5, relief: 0.55 },
     plate: { printer: 'custom', x: bed, y: bed, z: 250, smartOrientation: true },
     ornament: { ...DEFAULT_CONFIG.ornament, style: 'acanthus' },
+    // Draft resolution: the kernel's heap is never freed between cases, and
+    // the suite builds a great many frames in one process.
+    quality: 0,
     ...extra,
   })
 
@@ -1187,6 +1190,8 @@ console.log('')
     ['carved A3', 303, 426, 256, {}],
     ['carved 600×800 running', 600, 800, 256, { ornament: { ...DEFAULT_CONFIG.ornament, style: 'acanthus', symmetry: 'running' } }],
     ['carved 200×1000 on 220', 200, 1000, 220, {}],
+    ['filigree A3', 303, 426, 256, { profilePreset: 'flat', ornament: { ...DEFAULT_CONFIG.ornament, style: 'filigree', depth: 0.8 } }],
+    ['filigree 600×800 on 220', 600, 800, 220, { profilePreset: 'flat', ornament: { ...DEFAULT_CONFIG.ornament, style: 'filigree', depth: 0.8, corners: false } }],
     ['carved A3 plain corners', 303, 426, 220, { ornament: { ...DEFAULT_CONFIG.ornament, style: 'acanthus', corners: false, detail: 0 } }],
   ]
   for (const [label, w, h, bed, extra] of cases) {
@@ -1199,7 +1204,7 @@ console.log('')
     check(`${label}: carved pieces print without support`, frames.every((p) => !p.needsSupport))
     check(`${label}: flat back on the bed`, frames.every((p) => Math.abs(p.bounds.min[2]) < 1e-3))
     check(`${label}: relief stands above the moulding`,
-      frames.every((p) => p.bounds.max[2] > cfg.profile.depth + 1),
+      frames.every((p) => p.bounds.max[2] > cfg.profile.depth + Math.min(1, cfg.ornament.depth * 0.9)),
       frames.map((p) => p.bounds.max[2].toFixed(1)).join(', '))
     check(`${label}: no warnings`, r.warnings.length === 0, r.warnings.join('; '))
   }
@@ -1273,6 +1278,40 @@ console.log('')
       }
     }
     check(`${symmetry} carving: seamless at every repeat boundary`, jump < 1e-3, `${jump.toFixed(5)} mm`)
+  }
+
+  {
+    // Line work: continuous across the mitre and at every zone boundary, and
+    // exactly two levels — ground and line — with nothing in between but edges.
+    const { filigree } = await import('../src/core/ornament/filigree.ts')
+    const o = { ...DEFAULT_CONFIG.ornament, style: 'filigree' as const, depth: 0.8 }
+    for (const [w, h] of [[420, 560], [900, 1300], [150, 200]]) {
+      const geo = layoutOrnament(w, h, 60, o)
+      let mitre = 0
+      let jump = 0
+      let levels = 0
+      let total = 0
+      for (const e of [geo.horizontal, geo.vertical]) {
+        for (let u = 0; u <= 60; u += 0.25) {
+          mitre = Math.max(mitre, Math.abs(filigree(-u, u, geo.horizontal, geo) - filigree(-u, u, geo.vertical, geo)))
+          for (let t = 0; t <= e.count; t++) {
+            const d = e.corner + t * e.pitch
+            if (d > e.length / 2) break
+            jump = Math.max(jump, Math.abs(filigree(d - 1e-6, u, e, geo) - filigree(d + 1e-6, u, e, geo)))
+          }
+          for (let d = -u; d < e.length / 2; d += 0.9) {
+            const v = filigree(d, u, e, geo)
+            total++
+            if (v < 0.02 || v > 0.78) levels++
+          }
+        }
+      }
+      check(`filigree ${w}×${h}: continuous across the mitre`, mitre < 1e-9, `${mitre}`)
+      check(`filigree ${w}×${h}: seamless at every zone boundary`, jump < 1e-3, `${jump.toFixed(5)} mm`)
+      check(`filigree ${w}×${h}: two flat levels`, levels / total > 0.85, `${((100 * levels) / total).toFixed(0)}% flat`)
+    }
+    const kept = decodeDesign(encodeDesign(designOf(carved(300, 400, 256, { ornament: o }))))
+    check('a filigree design survives a share link', kept?.ornament.style === 'filigree' && kept.ornament.depth === 0.8)
   }
 
   {

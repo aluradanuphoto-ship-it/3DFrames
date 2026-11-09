@@ -1,6 +1,7 @@
 import type { OrnamentStyle, ProfilePoint } from '../types.ts'
 import type { EdgeLayout, OrnamentGeometry } from './layout.ts'
 import { acanthus } from './acanthus.ts'
+import { filigree } from './filigree.ts'
 
 /**
  * Relief height above the moulding face at `(d, u)` on a rail. `a` is the
@@ -16,7 +17,8 @@ export const ORNAMENT_STYLES: {
   fn: OrnamentStyleFn | null
 }[] = [
   { id: 'none', label: 'None', blurb: 'Plain moulding', fn: null },
-  { id: 'acanthus', label: 'Baroque acanthus', blurb: 'C-scrolls, acanthus and shell corners', fn: acanthus },
+  { id: 'acanthus', label: 'Baroque acanthus', blurb: 'Foliage scrolls round rosettes, palmettes, shell corners, pearl and rope bands', fn: acanthus },
+  { id: 'filigree', label: 'Filigree scrollwork', blurb: 'Fine raised scrolls and tendrils on a flat ground, inside a raised rim', fn: filigree },
 ]
 
 export const ornamentStyle = (id: OrnamentStyle) => ORNAMENT_STYLES.find((s) => s.id === id)?.fn ?? null

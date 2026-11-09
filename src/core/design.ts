@@ -96,7 +96,7 @@ export function reviveDesign(raw: unknown): Design {
       angle: num(face.angle, base.face.angle),
     },
     ornament: {
-      style: pick(orn.style, ['none', 'acanthus'] as const, base.ornament.style),
+      style: pick(orn.style, ['none', 'acanthus', 'filigree'] as const, base.ornament.style),
       depth: num(orn.depth, base.ornament.depth),
       spacing: num(orn.spacing, base.ornament.spacing),
       detail: num(orn.detail, base.ornament.detail),

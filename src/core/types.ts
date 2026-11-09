@@ -68,7 +68,7 @@ export type FacePattern =
  * out motif by motif: corner pieces, whole repeats along each rail, and nothing
  * stretched to make the numbers come out.
  */
-export type OrnamentStyle = 'none' | 'acanthus'
+export type OrnamentStyle = 'none' | 'acanthus' | 'filigree'
 
 /**
  * 'mirrored' — every repeat is symmetrical: back-to-back C-scrolls round a

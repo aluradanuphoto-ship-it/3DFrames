@@ -118,7 +118,7 @@ export async function buildFrame(config: FrameConfig, deps: BuildDeps): Promise<
   }
 
   let segments = plan.segments.map((seg) =>
-    toManifold(
+    tidy(
       kernel,
       ornament ? heightSweep({
         points: seg.indices.map((j) => path.points[j]),
@@ -135,6 +135,7 @@ export async function buildFrame(config: FrameConfig, deps: BuildDeps): Promise<
         displacer,
         closed: plan.single,
       }),
+      !!ornament,
     ),
   )
 
@@ -559,10 +560,22 @@ function faceHeightAt(config: FrameConfig, u: number): number {
   return best || normaliseParams(config.profile).depth
 }
 
+/**
+ * A carved piece is sampled on a uniform grid, which spends most of its
+ * triangles on surfaces that are flat. Merging those back together changes
+ * nothing you could measure and makes the files a fraction of the size.
+ */
+function tidy(kernel: Kernel, mesh: RawMesh, carved: boolean) {
+  const solid = toManifold(kernel, mesh)
+  if (!carved) return solid
+  const slim = solid.simplify(0.01)
+  return slim.isEmpty() ? solid : slim
+}
+
 /** Grid spacing of the carving, by quality. */
-const ORNAMENT_STEP = [0.9, 0.7, 0.5, 0.4]
+const ORNAMENT_STEP = [0.8, 0.55, 0.4, 0.3]
 /** Most face samples a carved frame may have, which bounds memory and export size. */
-const ORNAMENT_SAMPLES = 1_600_000
+const ORNAMENT_SAMPLES = 2_400_000
 
 /**
  * Everything the carved sweep needs, or null for a plain frame. Ornament is
@@ -591,8 +604,11 @@ export function ornamentPlan(
   }
   const geo = layoutOrnament(sightW, sightH, params.width, config.ornament)
   const perimeter = 2 * (sightW + sightH) + 8 * params.width
-  const budget = preview ? ORNAMENT_SAMPLES / 8 : ORNAMENT_SAMPLES
-  const step = Math.max(preview ? 1 : ORNAMENT_STEP[config.quality] ?? 0.7, Math.sqrt((perimeter * params.width) / budget))
+  const budget = preview ? ORNAMENT_SAMPLES / 6 : ORNAMENT_SAMPLES
+  // Line work is all edges, so it is never sampled coarser than 0.4 mm by choice.
+  const wanted = preview ? 0.75 : ORNAMENT_STEP[config.quality] ?? 0.55
+  const fine = config.ornament.style === 'filigree' && (preview || config.quality > 0) ? Math.min(wanted, preview ? 0.5 : 0.4) : wanted
+  const step = Math.max(fine, Math.sqrt((perimeter * params.width) / budget))
   return {
     path: ornamentPath(geo, step),
     section: ornamentSection(profile, step),

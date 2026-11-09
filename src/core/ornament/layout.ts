@@ -61,13 +61,16 @@ export function layoutOrnament(
   o: OrnamentConfig,
 ): OrnamentGeometry {
   const corner = width * (o.corners ? 1.15 : 0.8)
-  const minPitch = width * Math.max(1.2, o.spacing)
+  // A repeat can never be shorter than the motif it has to hold.
+  const minPitch = width * Math.max(1.5, o.spacing)
+  // Squeezed, but never below what the motif itself needs.
+  const shortest = Math.max(minPitch * 0.92, width * 1.4)
   const edge = (length: number): EdgeLayout => {
     const usable = length - 2 * corner
-    if (usable < minPitch * 0.92) return { length, corner: Math.min(corner, length / 2), count: 0, pitch: 0 }
+    if (usable < shortest) return { length, corner: Math.min(corner, length / 2), count: 0, pitch: 0 }
     // A repeat may be squeezed by up to 8 %, which only shortens the stem
     // between motifs, rather than leave a long bare stem on every rail.
-    const count = Math.floor(usable / (minPitch * 0.92))
+    const count = Math.floor(usable / shortest)
     return { length, corner, count, pitch: usable / count }
   }
   return {

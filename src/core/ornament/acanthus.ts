@@ -1,95 +1,111 @@
 import type { EdgeLayout, OrnamentGeometry } from './layout.ts'
-import { cap, dome, ellipse, leaf, ridge, rosette, shell, smoothstep, volute, type LeafShape } from './primitives.ts'
+import { cap, dome, leaf, leafScroll, ridge, rosette, shell, smoothstep, type LeafShape } from './primitives.ts'
 
 /**
  * Classic Baroque acanthus.
  *
  * Across the moulding, from the sight edge out:
  *
- *   bead-and-reel  │  scroll field  │  gadrooned outer band
+ *   astragal │ pearls │ fillet │  carved field  │ fillet │ rope │ rim
  *
- * The scroll field carries the repeats. In the mirrored arrangement each
- * repeat is a pair of C-scrolls rolled away from a central acanthus fan, their
- * tails sheathed in leaves and joined to the next repeat by a plain stem. In
- * the running arrangement the stem is a continuous wave throwing off a scroll
- * at every crest. Each corner carries a fan shell on the mitre with a great
- * acanthus leaf sweeping from it along both rails into a scroll.
+ * The field is a recessed ground that the carving stands up from. Each repeat
+ * is an upright palmette with a scroll of foliage either side, each scroll
+ * coiled round a rosette; neighbouring repeats stand back to back with a bud
+ * between them. A corner carries a scallop shell across the mitre, great
+ * leaves sweeping from it along both rails, and a scroll on each leg.
  *
- * All dimensions are proportions of the moulding width `W` so the carving
+ * All dimensions are proportions of the moulding width `W`, so the carving
  * keeps its character at any size; heights are fractions of the relief depth.
- * Nothing narrower than about 1.2 mm is ever produced at the minimum width.
  */
 
-/** Positions across the moulding, as fractions of its width. */
-const BEAD_U = 0.12
-const BEAD_R = 0.05
-const STEM_U = 0.36
-const SCROLL_R = 0.235
-const GADROON_U = 0.885
-const GADROON_HALF = 0.06
+/** The carved field, as fractions of the moulding width. */
+const FIELD_LO = 0.245
+const FIELD_HI = 0.795
+const FIELD_MID = (FIELD_LO + FIELD_HI) / 2
 
-/** Fraction of the minimum repeat the motif itself occupies; the rest is stem. */
-export const MOTIF_FRACTION = 0.86
+/** A scroll: stalk radius, how far its foliage stands out, and its rosette. */
+const SCROLL_R = 0.16
+const SCROLL_FRINGE = 0.102
+const SCROLL_EXTENT = SCROLL_R + SCROLL_FRINGE
+const ROSETTE_R = 0.1
+
+/** How far a scroll stands from the palmette it springs from. */
+const SCROLL_OFFSET = 0.44
+/** Half the length of one motif; a repeat is never shorter than twice this. */
+export const MOTIF_HALF = SCROLL_OFFSET + SCROLL_EXTENT
+
+/** Everything fades to the shared ground over this distance from a zone boundary (mm). */
+const WINDOW_MM = 1.2
 
 export function acanthus(d: number, u: number, edge: EdgeLayout, g: OrnamentGeometry, a = d): number {
   const W = g.width
   const D = g.depth
   if (D <= 0) return 0
 
-  let h = Math.max(bands(d, u, edge, g), cushion(u, g))
+  let h = bands(d, u, edge, g)
 
-  const stemHalf = Math.max(0.8, 0.045 * W)
-  if (d < edge.corner) {
-    h = Math.max(h, corner(-d, u, edge, g, stemHalf))
-  } else if (edge.count === 0) {
-    // A rail too short for a repeat: just the stem across the gap.
-    h = Math.max(h, 0.55 * D * ridge(u, STEM_U * W, stemHalf))
-  } else {
-    // A symmetrical repeat is read from the nearer corner, so the rail mirrors
-    // about its middle; a running vine is read along the rail, so it flows
-    // one way from corner to corner. Both meet the corners on a plain stem.
-    const q = (g.symmetry === 'running' ? a : d) - edge.corner
-    const k = Math.min(edge.count - 1, Math.max(0, Math.floor(q / edge.pitch)))
-    const t = q - (k + 0.5) * edge.pitch
-    h = Math.max(h, g.symmetry === 'running' ? running(t, u, edge.pitch, g, stemHalf) : mirrored(t, u, edge.pitch, g, stemHalf))
+  const mask = smoothstep(FIELD_LO * W, FIELD_LO * W + 0.6, u) * smoothstep(FIELD_HI * W, FIELD_HI * W - 0.6, u)
+  if (mask > 0) {
+    let field = 0
+    if (d < edge.corner) {
+      field = corner(-d, u, edge, g) * smoothstep(0, WINDOW_MM, edge.corner - d)
+    } else if (edge.count === 0) {
+      // Too short for a repeat: one bud in the middle, between the corners.
+      const half = edge.length / 2 - edge.corner
+      field = filler(d - edge.length / 2, u, half, g) * smoothstep(0, WINDOW_MM, d - edge.corner)
+    } else if (g.symmetry === 'running') {
+      field = running(a, u, edge, g)
+    } else {
+      field = mirrored(d, u, edge, g)
+    }
+    h = Math.max(h, field * mask)
   }
+
+  if (g.corners && d < 0.4 * W) h = Math.max(h, cornerShell(-d, u, g))
 
   // Let the relief die away at both edges of the moulding: a crisp sight line,
   // and an outer silhouette that is the profile's and not the carving's.
-  const fade = smoothstep(0, Math.min(2, W * 0.04), u) * smoothstep(0, Math.min(2, W * 0.04), W - u)
+  const fade = smoothstep(0, Math.min(1.5, W * 0.03), u) * smoothstep(0, Math.min(1.5, W * 0.03), W - u)
   return h * fade
 }
 
-/**
- * A broad half-round torus under the scroll field. Carving stands on it, so the
- * scrolls sit a layer above the bands either side instead of on a flat floor.
- */
-function cushion(u: number, g: OrnamentGeometry): number {
-  const W = g.width
-  const lo = 0.2 * W
-  const hi = 0.8 * W
-  const half = (hi - lo) / 2
-  return 0.3 * g.depth * cap(Math.abs(u - (lo + hi) / 2), half) ** 0.6
-}
-
-/** The bead-and-reel and gadroon bands, continuous along the whole rail. */
+/** The plain and enriched mouldings that border the field, continuous along the rail. */
 function bands(d: number, u: number, edge: EdgeLayout, g: OrnamentGeometry): number {
-  if (g.detail < 0.2) return 0
   const W = g.width
   const D = g.depth
-  let h = 0
+  const fillet = Math.max(0.8, 0.02 * W)
+  // The fillets either side of the field are what make the ground read as sunk.
+  let h = 0.34 * D * Math.max(ridge(u, (FIELD_LO - 0.028) * W, fillet), ridge(u, (FIELD_HI + 0.028) * W, fillet))
+  h = Math.max(h, 0.3 * D * ridge(u, 0.05 * W, Math.max(0.9, 0.038 * W)))
 
-  const beadR = Math.max(0.9, BEAD_R * W)
-  const beadU = BEAD_U * W
-  if (Math.abs(u - beadU) < beadR) {
-    h = Math.max(h, 0.5 * D * row(d, edge, g, beadU, beadR * 2.3, (c) => dome(d, u, c, beadU, beadR)))
+  // Pearls.
+  const pearlU = 0.142 * W
+  const pearlR = Math.max(0.9, 0.046 * W)
+  if (Math.abs(u - pearlU) < pearlR) {
+    h = Math.max(h, g.detail >= 0.2
+      ? 0.52 * D * row(d, edge, pearlU, pearlR * 2.15, (c) => dome(d, u, c, pearlU, pearlR))
+      : 0.4 * D * ridge(u, pearlU, pearlR))
   }
 
-  const gU = GADROON_U * W
-  const gHalf = GADROON_HALF * W
-  if (g.detail >= 0.45 && Math.abs(u - gU) < gHalf) {
-    const pitch = Math.max(2.4, 0.085 * W)
-    h = Math.max(h, 0.42 * D * row(d, edge, g, gU, pitch, (c, p) => ellipse(d, u, c, gU, p * 0.44, gHalf)))
+  // Rope: a torus cut by slanting grooves into strands.
+  const ropeU = 0.905 * W
+  const ropeHalf = Math.max(1.4, 0.058 * W)
+  if (Math.abs(u - ropeU) < ropeHalf) {
+    const torus = Math.pow(cap(Math.abs(u - ropeU), ropeHalf), 0.8)
+    if (g.detail < 0.2) {
+      h = Math.max(h, 0.62 * D * torus)
+    } else {
+      const pitch = Math.max(2.6, 0.085 * W)
+      const strand = row(d, edge, ropeU, pitch, (c, p) => {
+        // Each strand is an ellipse laid at a slant across the torus.
+        const dx = d - c
+        const du = u - ropeU
+        const along = dx * 0.62 + du * 0.78
+        const across = -dx * 0.78 + du * 0.62
+        return cap(Math.hypot(along / (ropeHalf * 1.45), across / (p * 0.43)), 1)
+      }, 2)
+      h = Math.max(h, 0.66 * D * torus * (0.5 + 0.5 * Math.pow(strand, 0.6)))
+    }
   }
   return h
 }
@@ -102,36 +118,34 @@ function bands(d: number, u: number, edge: EdgeLayout, g: OrnamentGeometry): num
 function row(
   d: number,
   edge: EdgeLayout,
-  g: OrnamentGeometry,
   across: number,
   target: number,
   element: (centre: number, pitch: number) => number,
+  reach = 1,
 ): number {
   let best = 0
-  // Corner run: from the mitre (d = −across) to the corner zone boundary.
   // On a rail with no repeats the corner run reaches the middle, where the row
   // mirrors onto itself.
   const reachTo = edge.count > 0 ? edge.corner : edge.length / 2
   const run = reachTo + across
   const m = Math.max(1, Math.round(run / target - 0.5))
   const pc = run / (m + 0.5)
-  if (d < reachTo + pc) {
+  if (d < reachTo + pc * reach) {
     const k = Math.round((d + across) / pc)
-    for (let j = k - 1; j <= k + 1; j++) {
-      if (j < 0 || j > m + (edge.count > 0 ? 0 : 1)) continue
+    for (let j = k - reach; j <= k + reach; j++) {
+      if (j > m + (edge.count > 0 ? 0 : reach)) continue
       best = Math.max(best, element(-across + j * pc, pc))
     }
   }
-  if (edge.count > 0 && d > edge.corner - target) {
+  if (edge.count > 0 && d > edge.corner - target * reach) {
     const per = Math.max(1, Math.round(edge.pitch / target))
     const pf = edge.pitch / per
     const j0 = Math.floor((d - edge.corner) / pf)
-    for (let j = j0 - 1; j <= j0 + 1; j++) {
+    for (let j = j0 - reach; j <= j0 + reach; j++) {
       if (j < 0) continue
       best = Math.max(best, element(edge.corner + (j + 0.5) * pf, pf))
     }
   }
-  void g
   return best
 }
 
@@ -139,101 +153,128 @@ function leafShape(g: OrnamentGeometry, length: number, half: number, curl: numb
   return {
     length,
     half: Math.max(1, half),
-    lobes: Math.max(2, Math.round((2 + 2.5 * g.detail) * Math.min(1.6, length / (0.4 * g.width)))),
+    lobes: Math.max(2, Math.round((2 + 2 * g.detail) * Math.min(1.7, length / (0.4 * g.width)))),
     curl,
     height,
   }
 }
 
 /**
- * Half a repeat, in coordinates where the motif's centre is at x = `centre`
- * and x decreases toward the repeat boundary. A stem sheathed in acanthus runs
- * out from the centre to a C-scroll, which rolls back toward the centre — so at
- * every boundary two scrolls stand back to back, tied by a small rosette.
+ * A scroll of foliage coiled round a rosette, centred on x = 0. The stalk
+ * springs from low on the +x side, sweeps under, up the far side and over the
+ * top, and its tip turns in beside the flower.
  */
-function halfRepeat(x: number, u: number, centre: number, cx: number, boundary: number, g: OrnamentGeometry, stemHalf: number, tied = true): number {
+function scroll(x: number, u: number, g: OrnamentGeometry): number {
   const W = g.width
   const D = g.depth
-  const R = SCROLL_R * W
-  const stem = STEM_U * W
-  let h = 0
-  // Stem from the centre out to the scroll, and on across the tie.
-  if (x <= centre) h = 0.55 * D * ridge(u, stem, stemHalf)
-  // The scroll, rolling up its outer side and back in toward the centre.
-  h = Math.max(h, volute(x, u, cx, stem + R, R, Math.max(1.1, 0.05 * W), 1.35, -Math.PI / 2, -1, 0.66 * D, 0.95 * D))
-  // Acanthus sheathing the stem, growing out of the centre toward the scroll,
-  // with a second rank behind it so the stem is clothed in foliage.
-  const reach = centre - cx
-  h = Math.max(h, leaf(x, u, centre - 0.04 * W, stem - 0.03 * W, Math.PI + 0.12, leafShape(g, 0.78 * reach, 0.15 * W, -0.22, 0.92 * D)))
-  h = Math.max(h, leaf(x, u, centre - 0.1 * W, stem + 0.02 * W, Math.PI - 0.5, leafShape(g, 0.5 * reach, 0.11 * W, -0.25, 0.78 * D)))
-  // A small leaf tucked under the scroll's throat.
-  h = Math.max(h, leaf(x, u, cx + 0.3 * R, stem - 0.02 * W, Math.PI + 0.9, leafShape(g, 0.8 * R, 0.075 * W, -0.3, 0.68 * D)))
-  // Where the scrolls stand back to back: a band ties them if they are close,
-  // and a rosette with a leaf each side fills the stem if they are not. Both
-  // are a fixed size, centred on the boundary, so the gap is filled without
-  // anything being stretched.
-  // A tie straddles the boundary, so it is only drawn where the far side
-  // draws its other half: between two symmetrical repeats.
-  const gap = cx - R - boundary
-  if (!tied) {
-    // Plain stem only; a running vine picks it up on the other side.
-  } else if (gap < 0.32 * W) {
-    h = Math.max(h, 0.78 * D * ellipse(x, u, boundary, stem, Math.max(1.2, 0.05 * W), 0.1 * W))
-  } else {
-    h = Math.max(h, rosette(x, u, boundary, stem, 0.13 * W, 6, 0.9 * D))
-    h = Math.max(h, leaf(x, u, boundary + 0.1 * W, stem, 0.1, leafShape(g, Math.min(gap - 0.06 * W, 0.4 * W), 0.09 * W, 0.15, 0.75 * D)))
+  if (Math.abs(x) > 0.36 * W) return 0
+  const uc = FIELD_MID * W
+  const lobes = Math.round(5 + 3 * g.detail)
+  let h = leafScroll(x, u, 0, uc, SCROLL_R * W, 0.126 * W, 0.97, -0.75, -1, SCROLL_FRINGE * W, lobes, 0.86 * D)
+  h = Math.max(h, rosette(x, u, 0, uc, ROSETTE_R * W, 6, 0.97 * D))
+  if (g.detail >= 0.35) {
+    // Leaf tips breaking out of the scroll into the corners of its cell.
+    const r0 = 0.15 * W
+    for (const [sx, su] of [[-1, 1], [-1, -1], [1, 1]] as const) {
+      const ang = Math.atan2(su, sx * 1.15)
+      h = Math.max(h, leaf(x, u, r0 * Math.cos(ang), uc + r0 * Math.sin(ang), ang, leafShape(g, 0.2 * W, 0.075 * W, 0.18 * sx * su, 0.72 * D)))
+    }
   }
   return h
 }
 
-/** A symmetrical repeat: two C-scrolls springing from a central acanthus cluster. */
-function mirrored(t: number, u: number, pitch: number, g: OrnamentGeometry, stemHalf: number): number {
+/** The upright palmette, as seen from x ≤ 0; the other half is its mirror image. */
+function palmette(x: number, u: number, g: OrnamentGeometry): number {
   const W = g.width
   const D = g.depth
-  const x = -Math.abs(t)
-  const motif = MOTIF_FRACTION * g.minPitch
-  const R = SCROLL_R * W
-  let h = halfRepeat(x, u, 0, -(motif / 2 - R), -pitch / 2, g, stemHalf)
-
-  // The central cluster: a tall leaf, two that curl outward over the stems,
-  // and a pair hanging below.
-  const by = STEM_U * W - 0.02 * W
-  h = Math.max(h, 0.85 * D * dome(x, u, 0, by, Math.max(1.4, 0.09 * W)))
-  h = Math.max(h, leaf(x, u, 0, by, Math.PI / 2, leafShape(g, 0.5 * W, 0.15 * W, 0, D)))
-  h = Math.max(h, leaf(x, u, 0, by, Math.PI / 2 + 0.6, leafShape(g, 0.44 * W, 0.13 * W, 0.3, 0.88 * D)))
-  h = Math.max(h, leaf(x, u, 0, by, Math.PI / 2 + 1.3, leafShape(g, 0.3 * W, 0.1 * W, 0.35, 0.72 * D)))
-  h = Math.max(h, leaf(x, u, 0, by, -Math.PI / 2 - 0.6, leafShape(g, 0.17 * W, 0.07 * W, -0.3, 0.6 * D)))
+  if (x < -0.42 * W) return 0
+  const by = (FIELD_LO + 0.11) * W
+  let h = leaf(x, u, 0, by, Math.PI / 2, leafShape(g, 0.43 * W, 0.12 * W, 0, D))
+  h = Math.max(h, leaf(x, u, -0.01 * W, by + 0.01 * W, Math.PI / 2 + 0.58, leafShape(g, 0.4 * W, 0.115 * W, 0.34, 0.9 * D)))
+  h = Math.max(h, leaf(x, u, -0.02 * W, by, Math.PI / 2 + 1.22, leafShape(g, 0.31 * W, 0.1 * W, 0.42, 0.78 * D)))
+  // A pendant below, and the cup they all spring from.
+  h = Math.max(h, leaf(x, u, 0, by, -Math.PI / 2, leafShape(g, 0.115 * W, 0.05 * W, 0, 0.7 * D)))
+  h = Math.max(h, 0.92 * D * dome(x, u, 0, by, Math.max(1.3, 0.062 * W)))
+  h = Math.max(h, 0.8 * D * dome(x, u, -0.085 * W, by - 0.012 * W, Math.max(1, 0.036 * W)))
   return h
 }
 
 /**
- * A running repeat: a wave-shaped stem throwing off one scroll at its crest
- * and a leaf into its trough. Because positions are measured from the nearer
- * corner, the vine flows out from the middle of each rail toward its corners.
+ * What fills a gap between motifs: a bud with a leaf above and below, and,
+ * when there is room, leaves reaching out along the rail. Everything has a
+ * fixed size or stops short, so slack in the layout is taken up without any
+ * motif being stretched. `s` is measured from the middle of the gap, which is
+ * `avail` wide each side.
  */
-function running(t: number, u: number, pitch: number, g: OrnamentGeometry, stemHalf: number): number {
+function filler(s: number, u: number, avail: number, g: OrnamentGeometry): number {
   const W = g.width
   const D = g.depth
-  const stem = STEM_U * W
-  // The wave arrives at each boundary level and flat (the cos² envelope), so
-  // it meets the next repeat, and the straight stem in a corner, without a kink.
-  const amp = 0.12 * W
-  const k = (2 * Math.PI) / pitch
-  const env = Math.cos((Math.PI * t) / pitch) ** 2
-  const ys = stem + amp * Math.sin(k * t) * env
-  const slope = amp * (k * Math.cos(k * t) * env - (Math.PI / pitch) * Math.sin(k * t) * Math.sin((2 * Math.PI * t) / pitch))
-  let h = 0.55 * D * cap(Math.abs(u - ys) / Math.sqrt(1 + slope * slope), stemHalf)
-
-  const R = 0.2 * W
-  const crest = pitch / 4
-  const top = stem + amp * 0.65
-  // The scroll leaves the crest and rolls back against the flow, wrapped in a
-  // leaf; two more leaves are thrown down into the trough.
-  h = Math.max(h, volute(t, u, crest + 0.15 * R, top + R, R, Math.max(1.1, 0.05 * W), 1.35, -Math.PI / 2, -1, 0.66 * D, 0.95 * D))
-  h = Math.max(h, leaf(t, u, crest - 1.9 * R, top - 0.03 * W, 0.18, leafShape(g, 1.75 * R, 0.14 * W, 0.22, 0.92 * D)))
-  h = Math.max(h, leaf(t, u, -crest - 1.4 * R, stem - amp * 0.5, -0.2, leafShape(g, 0.48 * W, 0.14 * W, -0.25, 0.88 * D)))
-  h = Math.max(h, leaf(t, u, -crest + 0.2 * R, stem - amp * 0.6, -2.3, leafShape(g, 0.22 * W, 0.08 * W, 0.3, 0.65 * D)))
+  if (avail < 0.045 * W) return 0
+  const x = Math.abs(s)
+  if (x > avail + 0.02 * W) return 0
+  const uc = FIELD_MID * W
+  const bud = Math.min(0.1 * W, avail * 0.75)
+  const half = Math.min(0.075 * W, avail * 0.8)
+  let h = leaf(x, u, 0, uc + bud * 0.4, Math.PI / 2, leafShape(g, 0.25 * W - bud * 0.4, half, 0, 0.84 * D))
+  h = Math.max(h, leaf(x, u, 0, uc - bud * 0.4, -Math.PI / 2, leafShape(g, 0.25 * W - bud * 0.4, half, 0, 0.84 * D)))
+  h = Math.max(h, bud >= 0.055 * W ? rosette(x, u, 0, uc, bud, 5, 0.92 * D) : 0.9 * D * dome(x, u, 0, uc, bud))
+  const span = Math.min(avail - bud * 0.7 - 0.02 * W, 0.75 * W)
+  if (span >= 0.13 * W) {
+    // With room to spare the bud throws a great leaf each way along the rail,
+    // and smaller ones into the corners between.
+    h = Math.max(h, leaf(x, u, bud * 0.7, uc, 0, leafShape(g, span, Math.min(0.17 * W, span * 0.4), 0, 0.88 * D)))
+    if (span >= 0.3 * W) {
+      for (const up of [1, -1]) {
+        h = Math.max(h, leaf(x, u, bud * 0.5, uc + up * bud * 0.5, up * 0.62, leafShape(g, 0.27 * W, 0.075 * W, -0.3 * up, 0.74 * D)))
+      }
+    }
+  }
   return h
+}
+
+/** Symmetrical repeats: palmette in the middle, a scroll either side. */
+function mirrored(d: number, u: number, edge: EdgeLayout, g: OrnamentGeometry): number {
+  const W = g.width
+  const q = d - edge.corner
+  const k = Math.min(edge.count - 1, Math.max(0, Math.floor(q / edge.pitch)))
+  const t = q - (k + 0.5) * edge.pitch
+  const x = -Math.abs(t)
+  let h = Math.max(palmette(x, u, g), scroll(x + SCROLL_OFFSET * W, u, g))
+
+  const gap = edge.pitch / 2 - MOTIF_HALF * W
+  if (k === 0 && t < 0) {
+    // Against a corner zone the bud sits wholly on this side of the boundary.
+    h = Math.max(h, filler(x + edge.pitch / 2 - gap / 2, u, gap / 2, g))
+    h *= smoothstep(0, WINDOW_MM, t + edge.pitch / 2)
+  } else {
+    // Between two repeats it straddles the boundary, half drawn by each.
+    h = Math.max(h, filler(x + edge.pitch / 2, u, gap, g))
+  }
+  return h
+}
+
+/**
+ * A running rinceau: scrolls that coil alternately toward the outer and the
+ * inner edge, following one another round the frame, with buds between.
+ */
+function running(a: number, u: number, edge: EdgeLayout, g: OrnamentGeometry): number {
+  const W = g.width
+  const q = a - edge.corner
+  const span = edge.count * edge.pitch
+  const k = Math.min(edge.count - 1, Math.max(0, Math.floor(q / edge.pitch)))
+  const t = q - (k + 0.5) * edge.pitch
+  const quarter = edge.pitch / 4
+  const flip = 2 * FIELD_MID * W - u
+  let h = Math.max(scroll(t + quarter, u, g), scroll(t - quarter, flip, g))
+  const gap = quarter - SCROLL_EXTENT * W
+  h = Math.max(h, filler(t, flip, gap, g))
+  // The bud on a boundary is drawn by both repeats, except against a corner.
+  const side = t < 0 ? -1 : 1
+  const atEnd = (side < 0 && k === 0) || (side > 0 && k === edge.count - 1)
+  h = Math.max(h, atEnd
+    ? filler(t - side * (2 * quarter - gap / 2), u, gap / 2, g)
+    : filler(t - side * 2 * quarter, u, gap, g))
+  return h * smoothstep(0, WINDOW_MM, q) * smoothstep(0, WINDOW_MM, span - q)
 }
 
 /**
@@ -242,21 +283,38 @@ function running(t: number, u: number, pitch: number, g: OrnamentGeometry, stemH
  * for; the other rail's half is the mirror image, which makes every corner
  * symmetrical about its diagonal by construction.
  */
-function corner(x: number, u: number, edge: EdgeLayout, g: OrnamentGeometry, stemHalf: number): number {
+function corner(x: number, u: number, edge: EdgeLayout, g: OrnamentGeometry): number {
   const W = g.width
   const D = g.depth
-  const stem = STEM_U * W
-  if (!g.corners) return 0.55 * D * ridge(u, stem, stemHalf)
+  const uc = FIELD_MID * W
+  if (!g.corners) {
+    // A rosette on the mitre with a leaf running out along each rail.
+    let h = rosette(x, u, uc, uc, 0.17 * W, 8, D)
+    h = Math.max(h, leaf(x, u, uc - 0.1 * W, uc, Math.PI, leafShape(g, edge.corner + uc - 0.14 * W, 0.17 * W, 0, 0.88 * D)))
+    return h
+  }
 
-  const R = SCROLL_R * W
-  const tie = ((1 - MOTIF_FRACTION) / 2) * g.minPitch
-  const boundary = -edge.corner
-  // The leg is half a repeat whose centre is the shell.
-  let h = halfRepeat(x, u, 0.12 * W, boundary + tie + R, boundary, g, stemHalf, g.symmetry === 'mirrored')
+  // The leg: a scroll with its rosette, standing back to back with the first repeat.
+  let h = scroll(x + edge.corner - (SCROLL_EXTENT + 0.012) * W, u, g)
 
-  const c = 0.2 * W
-  h = Math.max(h, shell(x, u, c, c, Math.PI / 4, 1.1, 0.7 * W, 7 + Math.round(4 * g.detail), D))
-  // Leaves spilling from under the shell onto each rail.
-  h = Math.max(h, leaf(x, u, c, c + 0.08 * W, Math.PI * 0.62, leafShape(g, 0.36 * W, 0.1 * W, 0.3, 0.85 * D)))
+  // Great leaves sweeping from under the shell along the rail, three deep.
+  h = Math.max(h, leaf(x, u, 0.2 * W, 0.5 * W, Math.PI + 0.02, leafShape(g, 0.82 * W, 0.17 * W, 0.05, 0.94 * D)))
+  h = Math.max(h, leaf(x, u, 0.24 * W, 0.36 * W, Math.PI + 0.1, leafShape(g, 0.5 * W, 0.1 * W, 0.2, 0.8 * D)))
+  h = Math.max(h, leaf(x, u, 0.1 * W, 0.69 * W, Math.PI - 0.04, leafShape(g, 0.52 * W, 0.095 * W, -0.16, 0.8 * D)))
+
+  // The knuckle the shell hinges on.
+  h = Math.max(h, D * dome(x, u, 0.262 * W, 0.262 * W, Math.max(1.4, 0.07 * W)))
   return h
+}
+
+/**
+ * The shell across the mitre. It is the one thing allowed out of the field:
+ * its rim rides up over the outer fillet, as far as the rope.
+ */
+function cornerShell(x: number, u: number, g: OrnamentGeometry): number {
+  const W = g.width
+  if (u > 0.85 * W || u < 0.2 * W) return 0
+  const c = 0.27 * W
+  const h = shell(x, u, c, c, Math.PI / 4, 1.0, 0.67 * W, 7 + 2 * Math.round(2 * g.detail), g.depth)
+  return h * smoothstep(0.848 * W, 0.848 * W - 0.6, u) * smoothstep(FIELD_LO * W, FIELD_LO * W + 0.6, u)
 }

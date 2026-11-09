@@ -1,6 +1,6 @@
 import { create } from 'zustand'
 import type { BuildResult, FrameConfig } from '../core/types.ts'
-import { BAROQUE_PROFILE, DEFAULT_CONFIG } from '../core/presets.ts'
+import { BAROQUE_PROFILE, DEFAULT_CONFIG, DEFAULT_ORNAMENT } from '../core/presets.ts'
 import { heightSweep } from '../core/geometry/heightfield.ts'
 import { MIN_ORNAMENT_WIDTH } from '../core/ornament/layout.ts'
 import { configFrom, type Design } from '../core/design.ts'
@@ -148,19 +148,27 @@ export const useFrameStore = create<FrameStore>((set, get) => ({
   setOrnament: (patch) => {
     const config = get().config
     const ornament = { ...config.ornament, ...patch }
-    const turningOn = config.ornament.style === 'none' && ornament.style !== 'none'
-    const widen = turningOn && config.profile.width < MIN_ORNAMENT_WIDTH * 1.5
+    const changed = ornament.style !== config.ornament.style && ornament.style !== 'none'
+    const narrow = config.profile.width < MIN_ORNAMENT_WIDTH * 1.5
+    const filigree = ornament.style === 'filigree'
+    if (changed) {
+      // Each style has its own idea of depth: carving stands millimetres
+      // proud, line work a few layers.
+      if (filigree && ornament.depth > 2) ornament.depth = 0.8
+      if (!filigree && ornament.depth < 2) ornament.depth = DEFAULT_ORNAMENT.depth
+    }
     set(withPreview({
       ...config,
       ornament,
-      ...(widen
+      ...(changed
         ? {
-            profilePreset: BAROQUE_PROFILE.preset,
+            // Line work wants a flat face to lie on; carving, a hollow to stand in.
+            profilePreset: filigree ? 'flat' as const : narrow ? BAROQUE_PROFILE.preset : config.profilePreset,
             profile: {
               ...config.profile,
-              width: BAROQUE_PROFILE.width,
-              depth: Math.max(config.profile.depth, BAROQUE_PROFILE.depth),
-              relief: BAROQUE_PROFILE.relief,
+              width: narrow ? BAROQUE_PROFILE.width : config.profile.width,
+              depth: narrow && !filigree ? Math.max(config.profile.depth, BAROQUE_PROFILE.depth) : config.profile.depth,
+              relief: narrow && !filigree ? BAROQUE_PROFILE.relief : config.profile.relief,
             },
           }
         : {}),

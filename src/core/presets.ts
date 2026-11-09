@@ -104,7 +104,7 @@ export const SIZE_PRESETS: SizePreset[] = [
 /** Ornament is off by default; these are the settings it starts from when turned on. */
 export const DEFAULT_ORNAMENT: FrameConfig['ornament'] = {
   style: 'none',
-  depth: 4.5,
+  depth: 5.5,
   spacing: 1.5,
   detail: 0.75,
   corners: true,

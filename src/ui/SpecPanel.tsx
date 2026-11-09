@@ -400,6 +400,7 @@ function OrnamentControls() {
   const repeat = (n: number, pitch: number) =>
     n ? `${n} × ${formatLength(pitch, config.unit)}` : 'corners only'
   const rectangular = config.shape === 'rectangle' || config.shape === 'square'
+  const filigree = o.style === 'filigree'
   return (
     <>
       {!rectangular ? (
@@ -411,26 +412,41 @@ function OrnamentControls() {
           its best from about 50 mm — widen it under Moulding.
         </p>
       ) : null}
-      <Slider label="Relief depth" value={o.depth} min={1} max={12} step={0.25}
-        onChange={(depth) => store.setOrnament({ depth })}
-        hint="How far the tallest carving stands above the moulding. 3–6 mm reads boldly from across a room and prints cleanly at 0.12–0.2 mm layers." />
-      <Slider label="Repeat length" value={o.spacing} min={1.2} max={3} step={0.05} suffix={`× width (${Math.round(o.spacing * params.width)} mm)`}
+      {filigree ? (
+        <Slider label="Line height" value={o.depth} min={0.3} max={2} step={0.05}
+          onChange={(depth) => store.setOrnament({ depth })}
+          hint="How far the lines and the rim stand above the ground. 0.6–1 mm is three to five layers. Change filament at the top of the ground and the scrollwork prints in a second colour." />
+      ) : (
+        <Slider label="Relief depth" value={o.depth} min={1} max={12} step={0.25}
+          onChange={(depth) => store.setOrnament({ depth })}
+          hint="How far the tallest carving stands above the moulding. 4–7 mm reads boldly from across a room and prints cleanly at 0.12–0.2 mm layers." />
+      )}
+      <Slider label="Repeat length" value={o.spacing} min={1.5} max={3} step={0.05} suffix={`× width (${Math.round(o.spacing * params.width)} mm)`}
         onChange={(spacing) => store.setOrnament({ spacing })}
-        hint="The shortest a repeat may be. Each rail fits as many whole repeats as it can; the scrolls keep their size and only the stems between them change length." />
+        hint={filigree
+          ? 'The shortest a repeat may be. Each rail fits as many whole repeats as it can; the scrolls keep their size and the vines between them run longer.'
+          : 'The shortest a repeat may be. Each rail fits as many whole repeats as it can; the motifs keep their size and a bud fills whatever is left between them.'} />
       <Slider label="Detail" value={o.detail} min={0} max={1} step={0.05} suffix=""
         onChange={(detail) => store.setOrnament({ detail })}
-        hint="Bead and gadroon bands and the number of lobes on each leaf. Turn it down for a quicker, plainer print." />
-      <Chips<OrnamentSymmetry>
-        label="Arrangement"
-        value={o.symmetry}
-        options={[
-          { id: 'mirrored', label: 'Symmetrical', blurb: 'Every repeat is mirror-symmetric: C-scrolls rolled back toward a central acanthus cluster.' },
-          { id: 'running', label: 'Running vine', blurb: 'A continuous scrolling vine that flows out from the middle of each rail toward its corners.' },
-        ]}
-        onChange={(symmetry) => store.setOrnament({ symmetry })}
-      />
+        hint={filigree
+          ? 'Tendrils, buds and the dots in the eye of each scroll. Turn it down for a plainer line.'
+          : 'The pearls, the rope twist, and how finely the leaves and shells are cut.'} />
+      {filigree ? null : (
+        <Chips<OrnamentSymmetry>
+          label="Arrangement"
+          value={o.symmetry}
+          options={[
+            { id: 'mirrored', label: 'Symmetrical', blurb: 'Every repeat is mirror-symmetric: an upright palmette with a scroll of foliage and a rosette either side.' },
+            { id: 'running', label: 'Running vine', blurb: 'Scrolls that coil alternately outward and inward, following one another round the frame.' },
+          ]}
+          onChange={(symmetry) => store.setOrnament({ symmetry })}
+        />
+      )}
       <Switch checked={o.corners} onChange={(corners) => store.setOrnament({ corners })}
-        title="Corner flourishes" note="A shell across each mitre with acanthus sweeping onto both rails." />
+        title="Corner flourishes"
+        note={filigree
+          ? 'An extra scroll on each leg of every corner. Off, the corners are shorter and plainer.'
+          : 'A scallop shell across each mitre with great leaves sweeping onto both rails. Off, a rosette takes its place.'} />
       <p className="hint">
         Top and bottom: {repeat(geo.horizontal.count, geo.horizontal.pitch)}. Sides: {repeat(geo.vertical.count, geo.vertical.pitch)}.
         Generate to see how it splits for your bed — seams only ever fall between repeats.
